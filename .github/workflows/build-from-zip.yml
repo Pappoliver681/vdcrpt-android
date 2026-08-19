@@ -1,0 +1,67 @@
+name: Build vdcrpt-android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'vdcrpt-android-port.zip'
+      - '.github/workflows/build-from-zip.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract source ZIP
+        run: |
+          rm -rf work
+          mkdir work
+          unzip -q vdcrpt-android-port.zip -d work
+          cp -a work/vdcrpt-android-port/. .
+
+      - name: Fix Android package ID
+        run: |
+          sed -i 's/io.github.pappoliver72.vdcrpt/io.github.pappoliver681.vdcrptandroid/g' src/Vdcrpt.Android/Vdcrpt.Android.csproj
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install Android workload
+        run: dotnet workload install android
+
+      - name: Install Android NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Build bundled FFmpeg for ARM64
+        run: |
+          chmod +x scripts/build-ffmpeg-android.sh
+          ./scripts/build-ffmpeg-android.sh
+
+      - name: Restore
+        run: dotnet restore src/Vdcrpt.Android/Vdcrpt.Android.csproj
+
+      - name: Build APK
+        run: dotnet publish src/Vdcrpt.Android/Vdcrpt.Android.csproj -c Release -f net10.0-android -r android-arm64 -p:AndroidPackageFormats=apk
+
+      - name: Collect APK
+        run: |
+          mkdir -p artifacts
+          find src/Vdcrpt.Android/bin/Release -type f -name '*.apk' -print -exec cp {} artifacts/ \;
+          ls -lah artifacts
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: vdcrpt-android-arm64
+          path: artifacts/*.apk
+          if-no-files-found: error
+
